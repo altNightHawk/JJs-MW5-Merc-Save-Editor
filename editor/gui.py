@@ -244,7 +244,7 @@ def _readable_combobox(parent, *, width: int, **kwargs) -> ttk.Combobox:
     return combo
 
 
-APP_VERSION = "1.17.4"
+APP_VERSION = "1.18.0"
 
 # update check (GitHub is the source of truth; Nexus may lag a release behind)
 GITHUB_REPO = "jonayetjubaer-cmyk/JJs-MW5-Merc-Save-Editor"
@@ -670,6 +670,12 @@ class EditorApp(tk.Tk):
         for txt, val in (("All", "all"), ("Active Bay", "active"), ("Cold Storage", "cold")):
             ttk.Radiobutton(flt, text=txt, value=val, variable=self.mech_filter,
                             command=self._refresh_mechs).pack(side="left", padx=2)
+        ttk.Label(flt, text="Sort:").pack(side="left", padx=(8, 2))
+        self.mech_sort_var = tk.StringVar(value="Save order")
+        sort = ttk.Combobox(flt, textvariable=self.mech_sort_var, state="readonly",
+                            values=("Save order", "A–Z", "Z–A"), width=12)
+        sort.pack(side="left")
+        sort.bind("<<ComboboxSelected>>", lambda e: self._refresh_mechs() if self.save else None)
 
         cwrap = ttk.Frame(mwrap)
         cwrap.pack(fill="both", expand=True)
@@ -902,6 +908,12 @@ class EditorApp(tk.Tk):
         self.inv_filter_var = tk.StringVar()
         ttk.Entry(filt, textvariable=self.inv_filter_var, width=30).pack(side="left", padx=4)
         self.inv_filter_var.trace_add("write", lambda *a: self._render_inventory())
+        ttk.Label(filt, text="Sort:").pack(side="left", padx=(8, 2))
+        self.inv_sort_var = tk.StringVar(value="A–Z")
+        sort = ttk.Combobox(filt, textvariable=self.inv_sort_var, state="readonly",
+                            values=("A–Z", "Z–A", "Column order"), width=12)
+        sort.pack(side="left")
+        sort.bind("<<ComboboxSelected>>", self._on_inventory_sort_choice)
         ttk.Label(filt, text="(click a column header to sort • shift/ctrl-click rows to multi-select)",
                   style="Muted.TLabel").pack(side="left", padx=8)
 
@@ -1158,7 +1170,12 @@ class EditorApp(tk.Tk):
         flt = getattr(self, "mech_filter", None)
         flt = flt.get() if flt is not None else "all"
         shown = []
-        for idx, m in enumerate(self._mech_objs):
+        indexed = list(enumerate(self._mech_objs))
+        order = self.mech_sort_var.get()
+        if order != "Save order":
+            indexed.sort(key=lambda entry: mech_display(entry[1].chassis).casefold(),
+                         reverse=order == "Z–A")
+        for idx, m in indexed:
             location = "Active bay" if idx < len(active) else "Cold storage"
             if flt == "active" and location != "Active bay":
                 continue
@@ -1595,6 +1612,14 @@ class EditorApp(tk.Tk):
     def _sort_inventory(self, col):
         cur_col, cur_rev = self._inv_sort
         self._inv_sort = (col, (not cur_rev) if col == cur_col else False)
+        self.inv_sort_var.set(("Z–A" if self._inv_sort[1] else "A–Z")
+                              if col == "item" else "Column order")
+        self._render_inventory()
+
+    def _on_inventory_sort_choice(self, event=None):
+        order = self.inv_sort_var.get()
+        if order != "Column order":
+            self._inv_sort = ("item", order == "Z–A")
         self._render_inventory()
 
     def _on_inv_double_click(self, event):
