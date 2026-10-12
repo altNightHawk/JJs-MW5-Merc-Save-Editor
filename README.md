@@ -218,6 +218,13 @@ better because of you:
 
 ## Changelog
 
+**v1.18.0**
+- **DLC9 — Ashes & Ascension and free update:** refreshed mech, weapon,
+  equipment, ammo, trait, and stock-loadout catalogs from game assets. Includes
+  639 mech variants, 1,085 inventory items, and 241 traits.
+- **A–Z / Z–A sorting:** explicit sort dropdowns beside the mech and inventory
+  filters; mech Save order and inventory column sorting are also available.
+
 **v1.17.4**
 - **Missing inventory recovery** - saves that omit an empty weapon or equipment
   inventory now open normally, and adding an item safely rebuilds the missing

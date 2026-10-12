@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.18.0
+- **Ashes & Ascension (DLC9) and its free update:** refreshed all four built-in
+  catalogs from the installed game assets using Scarab v1.9.8 with mods excluded.
+  Includes 639 mech variants with stock loadouts, 928 weapons, 49 equipment
+  entries, 108 ammo entries, and 241 pilot/mech traits. Adds 79 mech variants,
+  including the 13 new Clan chassis and three Inner Sphere OmniMech chassis.
+- **Sort dropdowns:** choose A–Z or Z–A alongside the mech and inventory filters.
+  The mech list also supports Save order; inventory column sorting remains
+  available. Sorting changes display order without rearranging the save's slots.
+
 ## v1.17.4
 - **Missing inventory frameworks are recovered safely.** Saves that omit an
   empty `WeaponInventory` or `EquipmentInventory` now open without the
