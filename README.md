@@ -218,6 +218,12 @@ better because of you:
 
 ## Changelog
 
+**v1.18.1**
+- **Pilot editing fixes:** Apply keeps the selected pilot and preserves unchanged
+  localized/formatted names. Invalid input is validated before any edits.
+- **Scrollable pilot form:** trait controls remain reachable in smaller windows
+  and at higher display scaling.
+
 **v1.18.0**
 - **DLC9 — Ashes & Ascension and free update:** refreshed mech, weapon,
   equipment, ammo, trait, and stock-loadout catalogs from game assets. Includes

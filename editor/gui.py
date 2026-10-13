@@ -244,7 +244,7 @@ def _readable_combobox(parent, *, width: int, **kwargs) -> ttk.Combobox:
     return combo
 
 
-APP_VERSION = "1.18.0"
+APP_VERSION = "1.18.1"
 
 # update check (GitHub is the source of truth; Nexus may lag a release behind)
 GITHUB_REPO = "jonayetjubaer-cmyk/JJs-MW5-Merc-Save-Editor"
@@ -793,8 +793,24 @@ class EditorApp(tk.Tk):
         ttk.Button(pbtns, text="Add Pilot…", command=self.on_add_pilot).pack(fill="x", pady=1)
         ttk.Button(pbtns, text="Remove Pilot", command=self.on_remove_pilot).pack(fill="x", pady=1)
 
-        form = ttk.Frame(self.pilot_tab)
-        form.pack(side="left", fill="both", expand=True, pady=4)
+        wrap = ttk.Frame(self.pilot_tab)
+        wrap.pack(side="left", fill="both", expand=True, pady=4)
+        wrap.rowconfigure(0, weight=1)
+        wrap.columnconfigure(0, weight=1)
+        self.pilot_canvas = tk.Canvas(wrap, highlightthickness=0)
+        self.pilot_canvas.grid(row=0, column=0, sticky="nsew")
+        vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.pilot_canvas.yview)
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb = ttk.Scrollbar(wrap, orient="horizontal", command=self.pilot_canvas.xview)
+        hsb.grid(row=1, column=0, sticky="ew")
+        self.pilot_canvas.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        form = ttk.Frame(self.pilot_canvas)
+        self.pilot_form = form
+        window = self.pilot_canvas.create_window((0, 0), window=form, anchor="nw")
+        form.bind("<Configure>", lambda e: self.pilot_canvas.configure(
+            scrollregion=self.pilot_canvas.bbox("all")))
+        self.pilot_canvas.bind("<Configure>", lambda e: self.pilot_canvas.itemconfigure(
+            window, width=max(e.width, form.winfo_reqwidth())))
 
         self.pilot_vars: dict[str, tk.StringVar] = {}
 
@@ -1437,11 +1453,15 @@ class EditorApp(tk.Tk):
 
     # -- pilot actions -----------------------------------------------------
     def _refresh_pilots(self):
+        previous = self._selected_pilot_index()
         self.pilot_list.delete(0, "end")
-        for p in self.save.pilots():
+        pilots = self.save.pilots()
+        for p in pilots:
             self.pilot_list.insert("end", p.callsign or p.full_name or "(pilot)")
-        if self.save.pilots():
-            self.pilot_list.selection_set(0)
+        if pilots:
+            idx = min(previous if previous is not None else 0, len(pilots) - 1)
+            self.pilot_list.selection_set(idx)
+            self.pilot_list.see(idx)
             self._load_pilot_form()
 
     def _selected_pilot_index(self):
@@ -1514,18 +1534,25 @@ class EditorApp(tk.Tk):
             return self._need_selection()
         p = self.save.pilots()[idx]
         try:
+            salary = int(self.pilot_vars["salary"].get())
+            xp = {sk: int(self.pilot_vars[f"skill_{sk}"].get()) for sk in SKILLS}
+            caps = {sk: int(self.pilot_vars[f"cap_{sk}"].get()) for sk in CAPPED_SKILLS}
+            if not 0 <= salary <= 2147483647 or any(
+                    not 0 <= value <= 2147483647 for value in xp.values()):
+                raise ValueError("Salary and XP must be between 0 and 2,147,483,647.")
+            if any(not 0 <= value <= MAX_SKILL_CAP for value in caps.values()):
+                raise ValueError("Skill caps must be between 0 and 10.")
             p.callsign = self.pilot_vars["callsign"].get()
             p.full_name = self.pilot_vars["full_name"].get()
-            p.salary = int(self.pilot_vars["salary"].get())
+            p.salary = salary
             for sk in SKILLS:
-                p.set_skill(sk, int(self.pilot_vars[f"skill_{sk}"].get()))
+                p.set_skill(sk, xp[sk])
                 if sk in CAPPED_SKILLS:
-                    p.set_skill_cap(sk, int(self.pilot_vars[f"cap_{sk}"].get()))
+                    p.set_skill_cap(sk, caps[sk])
             self._refresh_pilots()
-            self.pilot_list.selection_set(idx)
             self.status.set(f"Applied changes to pilot #{idx}. Remember to Save.")
-        except ValueError:
-            messagebox.showerror("Invalid input", "Salary, skill XP and caps must be whole numbers.")
+        except ValueError as exc:
+            messagebox.showerror("Invalid input", f"Salary, skill XP and caps must be whole numbers.\n{exc}")
 
     def on_max_caps(self):
         """Fill the cap fields for the selected pilot with the max (10)."""

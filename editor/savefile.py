@@ -71,12 +71,24 @@ def write_float(v: float) -> bytes:
 def read_text_property(payload: bytes) -> str:
     """Best-effort extraction of the display string from a TextProperty payload.
 
-    Two forms occur in MW5 pilot names:
+    Common forms occur in MW5 pilot names:
       * simple base/invariant:  [flags i32][0xff][i32=1][FString]
       * formatted ("{rank} {name}" with arg substitutions): a richer tree.
-    Pulls out the LAST embedded FString, which is the human-readable value in
-    both cases (the final resolved/source string)."""
+    Known invariant and localized forms are read structurally, including
+    Unicode. Other histories use a best-effort fallback for display only;
+    unchanged name fields must retain their original payload."""
     r = Reader(payload)
+    try:
+        r.i32()  # flags
+        history = r.read(1)
+        if history == b"\xff":
+            return r.fstring() if r.i32() else ""
+        if history == b"\x00":
+            r.fstring()  # namespace
+            r.fstring()  # localization key
+            return r.fstring()  # source text
+    except (ValueError, EOFError, struct.error, UnicodeError):
+        pass
     last = None
     # Scan for FString-shaped runs: an int32 length followed by that many bytes
     # ending in NUL. Simpler + robust than fully modelling FText history types.
@@ -1040,7 +1052,8 @@ class Pilot:
     @callsign.setter
     def callsign(self, value: str):
         p = _path(self.persona.decoded, "Callsign")
-        if p is not None:
+        # Preserve localization/format history when applying unrelated edits.
+        if p is not None and value != self.callsign:
             _set_leaf(p, build_text_property(value))
 
     @property
@@ -1051,7 +1064,8 @@ class Pilot:
     @full_name.setter
     def full_name(self, value: str):
         p = _path(self.persona.decoded, "FullName")
-        if p is not None:
+        # The display fallback is not a replacement for the original FText.
+        if p is not None and value != self.full_name:
             _set_leaf(p, build_text_property(value))
 
     def skill(self, name: str) -> int:

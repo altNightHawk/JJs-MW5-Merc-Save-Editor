@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.18.1
+- **Pilot selection stays on the edited pilot.** Apply no longer reloads the
+  first pilot's fields, making XP and cap edits appear to have been lost.
+- **Unchanged pilot names retain their game text.** Applying XP, caps or salary
+  preserves the original localized/formatted name payload instead of replacing
+  it with an extracted string. Unicode names also display correctly.
+- **Invalid input is checked before editing.** Salary, all XP fields and all
+  caps are validated together before changing the pilot; caps must be 0–10.
+- **Pilot traits remain reachable in small windows.** The pilot form now has
+  vertical and horizontal scrollbars for smaller screens and display scaling.
+- Validated with 47 automated tests and a real-save edit/save/reopen check:
+  XP and caps persist, names remain unchanged, and other pilots are untouched.
+  Reports from redlunatic and Leyasu prompted these fixes. In-game confirmation
+  with the reported affected save remains outstanding.
+
 ## v1.18.0
 - **Ashes & Ascension (DLC9) and its free update:** refreshed all four built-in
   catalogs from the installed game assets using Scarab v1.9.8 with mods excluded.
