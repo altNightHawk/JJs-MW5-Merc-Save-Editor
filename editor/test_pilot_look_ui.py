@@ -37,12 +37,25 @@ class PilotLookUiTests(unittest.TestCase):
         self.app.on_set_pilot_portrait()
         self.app.on_set_pilot_voice()
         self._select(1)
-        self.assertEqual(self.app.pilot_portrait_var.get(), "Raptor")
+        self.assertEqual(gui.pilot_catalog.resolve_asset(self.app.pilot_portrait_var.get()), "Raptor")
         self._select(0)
-        self.assertEqual(self.app.pilot_portrait_var.get(), "Female_Rank3_1")
-        self.assertEqual(self.app.pilot_voice_var.get(), "FemaleAlly1")
+        self.assertEqual(gui.pilot_catalog.resolve_asset(self.app.pilot_portrait_var.get()), "Female_Rank3_1")
+        self.assertEqual(gui.pilot_catalog.resolve_asset(self.app.pilot_voice_var.get()), "FemaleAlly1")
         pilot = self.app.save.pilots()[0]
         self.assertEqual((pilot.portrait, pilot.voice), ("Female_Rank3_1", "FemaleAlly1"))
+
+    def test_labelled_picker_values_are_resolved_when_set(self):
+        self._select(0)
+        self.app.pilot_voice_var.set(gui.pilot_catalog.voice_display("MaleAlly4"))
+        self.assertIn(" -- ", self.app.pilot_voice_var.get())     # tagged with its users
+        self.app.on_set_pilot_voice()
+        self.assertEqual(self.app.save.pilots()[0].voice, "MaleAlly4")
+
+    def test_bio_caption_says_whether_the_pilot_has_a_bio(self):
+        self._select(0)
+        self.assertIn("Current bio", self.app.pilot_bio_caption.get())
+        self._select(1)     # this pilot has no bio fields
+        self.assertIn("no bio", self.app.pilot_bio_caption.get())
 
     def test_unset_picker_does_not_change_the_pilot(self):
         self._select(0)
@@ -58,7 +71,7 @@ class PilotLookUiTests(unittest.TestCase):
                        if p["asset_name"] == "Raptor_Persona")
         self.app.pilot_persona_var.set(gui.pilot_catalog.persona_display(persona))
         self.app.on_apply_persona()
-        self.assertEqual(self.app.pilot_portrait_var.get(), "Raptor")
+        self.assertEqual(gui.pilot_catalog.resolve_asset(self.app.pilot_portrait_var.get()), "Raptor")
         pilot = self.app.save.pilots()[0]
         self.assertEqual((pilot.portrait, pilot.voice), ("Raptor", "MaleAlly9"))
 

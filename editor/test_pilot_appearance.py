@@ -150,6 +150,20 @@ class PilotCatalogTests(unittest.TestCase):
         self.assertTrue(pilot_catalog.has_name(
             {"asset_name": "X", "full_name": "Persona_Character_SamHagel_FullName"}))
 
+    def test_voice_and_portrait_labels_name_their_users(self):
+        label = pilot_catalog.voice_display("Freeman")
+        self.assertTrue(label.startswith("Freeman -- "), label)
+        self.assertEqual(pilot_catalog.resolve_asset(label), "Freeman")
+        # No known user (or only a name equal to the asset): the bare name.
+        self.assertEqual(pilot_catalog.voice_display("NoSuchVoice"), "NoSuchVoice")
+        self.assertEqual(pilot_catalog.portrait_display("Raptor"), "Raptor")
+        self.assertEqual(pilot_catalog.resolve_asset("Typed_Name"), "Typed_Name")
+
+    def test_placeholder_names_do_not_label_assets(self):
+        # "AI PILOT" repeats on dozens of personas, so it must not tag a voice.
+        for voice in pilot_catalog.VOICES:
+            self.assertNotIn("AI PILOT", pilot_catalog.voice_display(voice))
+
     def test_persona_picker_round_trips(self):
         persona = pilot_catalog.PERSONAS[0]
         found = pilot_catalog.find_persona(pilot_catalog.persona_display(persona))

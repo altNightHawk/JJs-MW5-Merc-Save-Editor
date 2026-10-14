@@ -945,8 +945,11 @@ class EditorApp(tk.Tk):
             "Voice", ar + 3, "Choose dialogue voice", self.on_set_pilot_voice, "Set")
         self.pilot_persona_var, self.pilot_persona_cb = look_row(
             "Persona", ar + 4, "Choose persona", self.on_apply_persona, "Apply")
+        self.pilot_bio_caption = tk.StringVar()
+        ttk.Label(form, textvariable=self.pilot_bio_caption, style="Muted.TLabel").grid(
+            row=ar + 6, column=0, columnspan=3, sticky="w", pady=(6, 0))
         bf = ttk.Frame(form)
-        bf.grid(row=ar + 6, column=0, columnspan=3, sticky="w", pady=2)
+        bf.grid(row=ar + 7, column=0, columnspan=3, sticky="w", pady=2)
         ttk.Label(bf, text="Bio", width=8).pack(side="left", anchor="n")
         self.pilot_bio_text = tk.Text(bf, width=34, height=5, wrap="word")
         self.pilot_bio_text.pack(side="left")
@@ -1665,10 +1668,13 @@ class EditorApp(tk.Tk):
         for sk in SKILLS:
             self.pilot_vars[f"skill_{sk}"].set(str(p.skill(sk)))
             self.pilot_vars[f"cap_{sk}"].set(str(p.skill_cap(sk)))
-        self.pilot_portrait_var.set(p.portrait)
-        self.pilot_voice_var.set(p.voice)
+        self.pilot_portrait_var.set(pilot_catalog.portrait_display(p.portrait))
+        self.pilot_voice_var.set(pilot_catalog.voice_display(p.voice))
         self.pilot_bio_text.delete("1.0", "end")
         self.pilot_bio_text.insert("1.0", p.bio)
+        self.pilot_bio_caption.set(
+            "Current bio. Edit it, then click Set." if p.bio
+            else "This pilot has no bio. Type one, then click Set.")
         self._refresh_pilot_looks()
         self._refresh_pilot_traits(p)
 
@@ -1677,12 +1683,14 @@ class EditorApp(tk.Tk):
         loaded save already uses (so modded or unknown assets stay selectable)."""
         pilots = self.save.pilots() if self.save else []
         sex = self.pilot_sex_var.get()
-        self.pilot_portrait_cb["values"] = pilot_catalog.asset_choices(
-            [p.portrait for p in pilots], pilot_catalog.PORTRAITS,
-            pilot_catalog.portrait_sex, sex)
-        self.pilot_voice_cb["values"] = pilot_catalog.asset_choices(
-            [p.voice for p in pilots], pilot_catalog.VOICES,
-            pilot_catalog.voice_sex, sex)
+        self.pilot_portrait_cb["values"] = [
+            pilot_catalog.portrait_display(name) for name in pilot_catalog.asset_choices(
+                [p.portrait for p in pilots], pilot_catalog.PORTRAITS,
+                pilot_catalog.portrait_sex, sex)]
+        self.pilot_voice_cb["values"] = [
+            pilot_catalog.voice_display(name) for name in pilot_catalog.asset_choices(
+                [p.voice for p in pilots], pilot_catalog.VOICES,
+                pilot_catalog.voice_sex, sex)]
         self.pilot_persona_cb["values"] = pilot_catalog.persona_choices(
             hireable_only=not self.pilot_persona_all_var.get())
 
@@ -1693,7 +1701,7 @@ class EditorApp(tk.Tk):
         idx = self._selected_pilot_index()
         if idx is None:
             return self._need_selection()
-        value = var.get().strip()
+        value = pilot_catalog.resolve_asset(var.get())
         if not value:
             return messagebox.showinfo(f"Pick {label}", f"Choose or type a {label} asset name.")
         p = self.save.pilots()[idx]
@@ -1701,7 +1709,8 @@ class EditorApp(tk.Tk):
             setattr(p, field, value)
         except ValueError as exc:
             return messagebox.showerror("Invalid input", str(exc))
-        var.set(getattr(p, field))
+        show = pilot_catalog.portrait_display if field == "portrait" else pilot_catalog.voice_display
+        var.set(show(getattr(p, field)))
         self.status.set(f"Set {p.callsign}'s {label} to {value}. Remember to Save.")
 
     def on_set_pilot_portrait(self):

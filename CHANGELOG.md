@@ -9,6 +9,10 @@
   every persona asset. Assets already in your save stay selectable. Each row has
   its own **Set** / **Apply** button (like the trait Add button) that writes to
   the pilot immediately.
+- **Portrait and voice pickers name who uses them.** Entries read like
+  `MaleAlly9 -- Raptor`, so you can tell what a voice or portrait belongs to
+  without hearing it. Placeholder names shared by many personas are left out.
+  The Bio box has a caption saying whether the pilot currently has a bio.
 - **Pilot bios are editable.** The Appearance section shows the pilot's bio and
   a **Set** button writes it. A bio is stored as up to three texts (Bio, Bio1,
   Bio2); setting it writes the whole text into Bio and empties the others.

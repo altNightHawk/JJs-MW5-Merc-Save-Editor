@@ -13,6 +13,7 @@ pilot; personas carry `Persona.Sex.Male/Female` tags, so portraits and voices
 inherit it from the personas that use them (and from their names otherwise).
 """
 import re
+from collections import Counter
 
 import catalog_source
 
@@ -175,3 +176,67 @@ def find_persona(text: str) -> dict | None:
         if persona["asset_name"] == asset:
             return persona
     return None
+
+
+# -- "who uses this" labels for the portrait / voice pickers -------------------
+_MAX_USERS_SHOWN = 2
+_MAX_NAME_REPEATS = 3   # a name on more personas than this is a placeholder
+
+
+def _rank(persona: dict) -> int:
+    """Sort key for naming a voice's users: lancemates and heroes, then other
+    hireable pilots, then the rest."""
+    tags = set(persona.get("attributes") or [])
+    if tags & {"PilotPersona.Use.Hero", "PilotPersona.Use.Lancemate"}:
+        return 0
+    return 1 if is_hireable(persona) else 2
+
+
+def _users_by_asset(field: str) -> dict[str, list[str]]:
+    """asset name -> names of the personas that use it. Named, hireable
+    characters come first; templates and crew without a real name are left out."""
+    named = [p for p in PERSONAS if has_name(p)]
+    # Placeholder names ("AI PILOT", "Lt. Major") repeat across many personas
+    # and say nothing about a voice; only distinctive names are useful.
+    seen = Counter(persona_name(p) for p in named)
+    rows: dict[str, list[tuple[int, str]]] = {}
+    for persona in named:
+        asset = persona.get(field)
+        name = persona_name(persona)
+        if asset and seen[name] <= _MAX_NAME_REPEATS:
+            rows.setdefault(asset, []).append((_rank(persona), name))
+    users = {}
+    for asset, found in rows.items():
+        names = []
+        for _, name in sorted(found, key=lambda row: (row[0], row[1].casefold())):
+            if name not in names:
+                names.append(name)
+        users[asset] = names
+    return users
+
+
+_PORTRAIT_USERS = _users_by_asset("portrait")
+_VOICE_USERS = _users_by_asset("voice")
+
+
+def _labelled(asset: str, users: dict[str, list[str]]) -> str:
+    names = [n for n in users.get(asset, []) if n.casefold() != asset.casefold()]
+    if not names:
+        return asset
+    shown = ", ".join(names[:_MAX_USERS_SHOWN])
+    more = len(names) - _MAX_USERS_SHOWN
+    return f"{asset}{_SEP}{shown}" + (f" (+{more})" if more > 0 else "")
+
+
+def portrait_display(asset: str) -> str:
+    """'LeonFreeman -- Leon Freeman': the asset, then who usually uses it."""
+    return _labelled(asset, _PORTRAIT_USERS)
+
+
+def voice_display(asset: str) -> str:
+    return _labelled(asset, _VOICE_USERS)
+
+
+def resolve_asset(text: str) -> str:
+    """A picker display string (or a bare typed name) -> the asset name."""
+    return text.split(_SEP, 1)[0].strip()
