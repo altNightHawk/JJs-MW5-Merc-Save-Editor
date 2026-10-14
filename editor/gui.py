@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import queue
 import shutil
 import sys
 import threading
@@ -24,6 +25,8 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 import catalog_source
 catalog_source.activate()
 import scarab_integration
+import cantina
+from file_safety import ensure_backup, atomic_save
 
 from savefile import SaveFile, SKILLS, CAPPED_SKILLS, MAX_SKILL_CAP
 
@@ -244,7 +247,7 @@ def _readable_combobox(parent, *, width: int, **kwargs) -> ttk.Combobox:
     return combo
 
 
-APP_VERSION = "1.18.1"
+APP_VERSION = "1.18.2"
 
 # update check (GitHub is the source of truth; Nexus may lag a release behind)
 GITHUB_REPO = "jonayetjubaer-cmyk/JJs-MW5-Merc-Save-Editor"
@@ -294,6 +297,7 @@ class EditorApp(tk.Tk):
         self._set_app_icon()
         self.save: SaveFile | None = None
         self.path: str | None = None
+        self._background_results = queue.Queue()
         # item catalog (static defaults; merged with save-referenced items on load)
         self.cat = {"weapon": list(WEAPONS), "equipment": list(EQUIPMENT), "ammo": list(AMMO)}
         # trait catalog (names the loaded save references; filled on open)
@@ -314,14 +318,17 @@ class EditorApp(tk.Tk):
         self.pilot_tab = ttk.Frame(self.nb)
         self.inv_tab = ttk.Frame(self.nb)
         self.faction_tab = ttk.Frame(self.nb)
+        self.cantina_tab = ttk.Frame(self.nb)
         self.nb.add(self.mech_tab, text="Mechs")
         self.nb.add(self.pilot_tab, text="Pilots")
         self.nb.add(self.inv_tab, text="Inventory")
         self.nb.add(self.faction_tab, text="Factions")
+        self.nb.add(self.cantina_tab, text="Cantina (experimental)")
         self._build_mech_tab()
         self._build_pilot_tab()
         self._build_inventory_tab()
         self._build_faction_tab()
+        self._build_cantina_tab()
 
         self.status = tk.StringVar(value="Open a .sav file to begin.")
         ttk.Label(self, textvariable=self.status, relief="sunken",
@@ -331,7 +338,40 @@ class EditorApp(tk.Tk):
 
         # quiet update check on startup (background; silent if offline)
         if load_pref("check_updates", True):
-            self.after(800, lambda: self._check_updates_async(manual=False))
+            self._startup_check = self.after(800, lambda: self._check_updates_async(manual=False))
+        self._background_poll = self.after(100, self._poll_background_results)
+
+    def destroy(self):
+        for pending in (getattr(self, "_background_poll", None),
+                        getattr(self, "_startup_check", None)):
+            if pending:
+                try:
+                    self.after_cancel(pending)
+                except tk.TclError:
+                    pass
+        super().destroy()
+
+    def _poll_background_results(self):
+        try:
+            while True:
+                callback, args = self._background_results.get_nowait()
+                callback(*args)
+        except queue.Empty:
+            pass
+        finally:
+            self._background_poll = self.after(100, self._poll_background_results)
+
+    def report_callback_exception(self, exc, value, tb):
+        folder = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "MW5SaveEditor")
+        path = os.path.join(folder, "errors.log")
+        try:
+            os.makedirs(folder, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as log:
+                log.write(f"\nEditor v{APP_VERSION}\n")
+                traceback.print_exception(exc, value, tb, file=log)
+        except OSError:
+            path = "Error log could not be written."
+        messagebox.showerror("Editor error", f"{exc.__name__}: {value}\n\n{path}", parent=self)
 
     def _set_app_icon(self):
         """Set the window / taskbar icon from the bundled app_icon.ico."""
@@ -582,7 +622,7 @@ class EditorApp(tk.Tk):
                     trusted,
                     build_report=report_var.get(),
                 )
-                self.after(0, lambda: finish_generate(result))
+                self._background_results.put((finish_generate, (result,)))
 
             threading.Thread(target=worker, daemon=True).start()
 
@@ -629,7 +669,7 @@ class EditorApp(tk.Tk):
 
         def worker():
             tag = fetch_latest_version()
-            self.after(0, lambda: self._on_update_result(tag, manual))
+            self._background_results.put((self._on_update_result, (tag, manual)))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -713,13 +753,17 @@ class EditorApp(tk.Tk):
     def _bind_mech_wheel(self, on):
         seqs = ("<MouseWheel>", "<Button-4>", "<Button-5>")
         if on:
-            for s in seqs:
-                self.mech_canvas.bind_all(s, self._mech_wheel)
+            if not getattr(self, "_mech_wheel_bindings", None):
+                self._mech_wheel_bindings = {
+                    s: self.bind(s, self._mech_wheel, add="+") for s in seqs}
         else:
-            for s in seqs:
-                self.mech_canvas.unbind_all(s)
+            for s, binding in getattr(self, "_mech_wheel_bindings", {}).items():
+                self.unbind(s, binding)
+            self._mech_wheel_bindings = {}
 
     def _mech_wheel(self, e):
+        if not str(e.widget).startswith(str(self.mech_canvas)):
+            return
         if e.num == 5 or e.delta < 0:
             self.mech_canvas.yview_scroll(1, "units")
         elif e.num == 4 or e.delta > 0:
@@ -861,8 +905,9 @@ class EditorApp(tk.Tk):
         taf = ttk.Frame(form)
         taf.grid(row=tr + 3, column=0, columnspan=3, sticky="w", pady=4)
         self.pilot_trait_var = tk.StringVar()
-        self.pilot_trait_cb = _readable_combobox(
+        self.pilot_trait_cb = SearchablePicker(
             taf, textvariable=self.pilot_trait_var, width=44,
+            title="Choose pilot trait",
         )
         self.pilot_trait_cb.pack(side="left")
         ttk.Button(taf, text="Add", command=self.on_add_pilot_trait).pack(side="left", padx=4)
@@ -908,14 +953,16 @@ class EditorApp(tk.Tk):
 
         ttk.Label(add, text="Item:").grid(row=0, column=2, sticky="w", padx=(8, 0))
         self.inv_item_var = tk.StringVar()
-        self.inv_item_cb = ttk.Combobox(add, textvariable=self.inv_item_var, width=36)
+        self.inv_item_cb = SearchablePicker(add, textvariable=self.inv_item_var,
+                                            width=24, title="Choose inventory item")
         self.inv_item_cb.grid(row=0, column=3, padx=4)
 
         ttk.Label(add, text="Count:").grid(row=0, column=4, sticky="w", padx=(8, 0))
         self.inv_count_var = tk.StringVar(value="1")
         ttk.Spinbox(add, from_=1, to=9999, textvariable=self.inv_count_var, width=6).grid(row=0, column=5, padx=4)
 
-        ttk.Button(add, text="Add to Inventory", command=self.on_add_item).grid(row=0, column=6, padx=8)
+        ttk.Button(add, text="Add to Inventory", command=self.on_add_item).grid(
+            row=1, column=2, columnspan=4, sticky="w", padx=8, pady=(4, 0))
 
         # filter / search row
         filt = ttk.Frame(self.inv_tab)
@@ -990,7 +1037,7 @@ class EditorApp(tk.Tk):
         self.faction_tree.configure(yscrollcommand=fsb.set)
         self.faction_tree.pack(side="left", fill="both", expand=True)
         fsb.pack(side="right", fill="y")
-        self.faction_tree.bind("<Double-Button-1>", lambda e: self.on_edit_standing())
+        self.faction_tree.bind("<Double-Button-1>", self._on_faction_double_click)
 
         btns = ttk.Frame(self.faction_tab)
         btns.pack(fill="x", padx=6, pady=(0, 6))
@@ -1015,6 +1062,13 @@ class EditorApp(tk.Tk):
             return messagebox.showerror("Invalid", "Reputation must be a whole number.")
         self.status.set(f"Set reputation to {self.save.reputation}. Remember to Save.")
 
+    def _on_faction_double_click(self, event):
+        row = self.faction_tree.identify_row(event.y)
+        if row:
+            self.faction_tree.selection_set(row)
+            self.on_edit_standing()
+        return "break"
+
     def on_edit_standing(self):
         if not self._guard():
             return
@@ -1024,7 +1078,8 @@ class EditorApp(tk.Tk):
         idx = int(sel[0])
         f = self.save.factions()[idx]
         new = simpledialog.askinteger("Edit standing", f"Standing for {f.name}:",
-                                      initialvalue=f.standing, minvalue=-1000, maxvalue=1000)
+                                      initialvalue=f.standing, minvalue=-1000, maxvalue=1000,
+                                      parent=self)
         if new is None:
             return
         f.standing = new
@@ -1039,6 +1094,84 @@ class EditorApp(tk.Tk):
             f.standing = value
         self._refresh_factions()
         self.status.set(f"Set all faction standings to {value}. Remember to Save.")
+
+    def _build_cantina_tab(self):
+        self.cantina_info = tk.StringVar(value="Open a save with existing Cantina career progress.")
+        ttk.Label(self.cantina_tab, textvariable=self.cantina_info, wraplength=650).pack(
+            fill="x", padx=8, pady=8)
+        ttk.Label(self.cantina_tab, wraplength=650, text=(
+                    "Experimental: edits existing path points only. Jobs, offers, campaign unlocks "
+            "and queued reward claims are preserved. Test with Save As on a copy; "
+            "in-game unlock/reward behaviour is not yet verified.")).pack(fill="x", padx=8)
+        ttk.Label(self.cantina_tab, wraplength=650, text=(
+            "Current game assets give Mech Collector tiers 5 and 6 the same "
+            "95-point threshold; the effective tier will display as 6.")).pack(fill="x", padx=8)
+        self.cantina_tree = ttk.Treeview(self.cantina_tab,
+                                        columns=("path", "points", "tier"), show="headings")
+        for column, label, width in (("path", "Career path", 260), ("points", "Points", 100),
+                                     ("tier", "Tier from points", 130)):
+            self.cantina_tree.heading(column, text=label)
+            self.cantina_tree.column(column, width=width)
+        self.cantina_tree.pack(fill="both", expand=True, padx=8, pady=8)
+        actions = ttk.Frame(self.cantina_tab)
+        actions.pack(fill="x", padx=8, pady=8)
+        self._cantina_buttons = []
+        for label, command in (("Set tier…", lambda: self._edit_cantina(True)),
+                               ("Set points…", lambda: self._edit_cantina(False)),
+                               ("Max all existing paths…", self._max_cantina)):
+            button = ttk.Button(actions, text=label, command=command, state="disabled")
+            button.pack(side="left", padx=(0, 6))
+            self._cantina_buttons.append(button)
+        self._cantina_paths = []
+
+    def _refresh_cantina(self):
+        self.cantina_tree.delete(*self.cantina_tree.get_children())
+        try:
+            self._cantina_paths = cantina.paths(self.save) if self.save else []
+            info = ("Existing Cantina paths. Tier thresholds come from the built-in game assets."
+                    if self._cantina_paths else
+                    "No existing Cantina career-progress records in this save. No records will be created.")
+        except ValueError as exc:
+            self._cantina_paths = []
+            info = str(exc)
+        self.cantina_info.set(info)
+        for i, path in enumerate(self._cantina_paths):
+            self.cantina_tree.insert("", "end", iid=str(i),
+                                     values=(path.label, path.points, path.tier if path.tier is not None else "Unknown"))
+        for button in self._cantina_buttons:
+            button.configure(state="normal" if self._cantina_paths else "disabled")
+
+    def _edit_cantina(self, by_tier):
+        selection = self.cantina_tree.selection()
+        if not selection:
+            return self._need_selection()
+        idx = int(selection[0])
+        path = self._cantina_paths[idx]
+        if by_tier and path.tier is None:
+            return messagebox.showinfo("Unknown thresholds", "Use Set points for this mod-added path.", parent=self)
+        value = simpledialog.askinteger("Cantina progress", f"{path.label}: {'tier (0–10)' if by_tier else 'points'}",
+                                        initialvalue=path.tier if by_tier else path.points,
+                                        minvalue=0, maxvalue=10 if by_tier else 2147483647, parent=self)
+        if value is None:
+            return
+        if by_tier:
+            path.set_tier(value)
+        else:
+            path.set_points(value)
+        self._refresh_cantina()
+        self.cantina_tree.selection_set(str(idx))
+        self.status.set(f"{path.label}: {path.points} points, tier {path.tier}. Save As a test copy.")
+
+    def _max_cantina(self):
+        if not self._cantina_paths:
+            return
+        if not messagebox.askyesno("Experimental Cantina edit",
+                "Set all existing built-in paths to maximum tier points?\n"
+                "Jobs and reward-claim records stay unchanged. Test with Save As on a copy.", parent=self):
+            return
+        count = cantina.max_paths(self._cantina_paths)
+        self._refresh_cantina()
+        self.status.set(f"Set {count} existing Cantina paths to max points. Save As a test copy.")
 
     def _build_item_catalog(self):
         """Merge the built-in item lists with everything the loaded save
@@ -1070,14 +1203,20 @@ class EditorApp(tk.Tk):
         try:
             self.save = SaveFile.load(path)
             self.path = path
+            try:
+                ensure_backup(path)
+                backup_status = "Backup: " + os.path.basename(path) + ".bak"
+            except OSError as exc:
+                backup_status = f"Backup unavailable: {exc}"
             self._build_item_catalog()
             self._refresh_mechs()
             self._refresh_pilots()
             self._refresh_inventory()
             self._refresh_factions()
+            self._refresh_cantina()
             self.status.set(f"Loaded {os.path.basename(path)} — "
                             f"{len(self.save.mechs())} mechs, {len(self.save.pilots())} pilots, "
-                            f"{self.save.cbills:,} C-Bills")
+                            f"{self.save.cbills:,} C-Bills. {backup_status}")
         except Exception as e:
             self._error("Failed to open save", e)
 
@@ -1094,18 +1233,16 @@ class EditorApp(tk.Tk):
             initialdir=os.path.dirname(self.path) if self.path else None,
             filetypes=[("MW5 save", "*.sav"), ("All files", "*.*")])
         if path:
-            self._write(path, backup=False)
+            self._write(path, backup=True)
 
     def _write(self, path, backup):
         try:
             if backup and os.path.exists(path):
-                bak = path + ".bak"
-                if not os.path.exists(bak):
-                    shutil.copy2(path, bak)
-            self.save.save(path)
+                ensure_backup(path)
+            atomic_save(self.save, path)
             self.path = path
             self.status.set(f"Saved {os.path.basename(path)}"
-                            + ("  (backup: .bak)" if backup else ""))
+                            + ("  (backup: .bak)" if os.path.exists(path + ".bak") else ""))
             messagebox.showinfo("Saved", f"Wrote {os.path.basename(path)} successfully.")
         except Exception as e:
             self._error("Failed to save", e)
@@ -1720,7 +1857,7 @@ class EditorApp(tk.Tk):
         title = (f"New count for {rows[0]['name']}:" if len(rows) == 1
                  else f"New count for the {len(rows)} selected items:")
         new = simpledialog.askinteger("Set count", title,
-                                      initialvalue=int(rows[0]["count"]), minvalue=0)
+                                      initialvalue=int(rows[0]["count"]), minvalue=0, parent=self)
         if new is None:
             return
         # group target names per inventory so we only scan each list once
@@ -1867,17 +2004,16 @@ class LoadoutDialog(tk.Toplevel):
         content.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.bind("<Configure>", lambda e: canvas.itemconfigure(cwin, width=e.width))
 
-        # Mouse-wheel scrolling while the dialog is open. bind_all catches the
-        # wheel wherever the cursor is (over comboboxes etc.); unbound on close.
+        # Scope wheel input to this dialog; closing it must not remove the
+        # editor's bindings or affect other windows/popups.
         def _wheel(e):
             if e.num == 5 or e.delta < 0:
                 canvas.yview_scroll(1, "units")
             elif e.num == 4 or e.delta > 0:
                 canvas.yview_scroll(-1, "units")
-        canvas.bind_all("<MouseWheel>", _wheel)
-        canvas.bind_all("<Button-4>", _wheel)
-        canvas.bind_all("<Button-5>", _wheel)
-        self.bind("<Destroy>", lambda e: self._unbind_wheel(canvas) if e.widget is self else None)
+        self.bind("<MouseWheel>", _wheel)
+        self.bind("<Button-4>", _wheel)
+        self.bind("<Button-5>", _wheel)
 
         # view toggle: Body (paper-doll) or List (dense, all hardpoints)
         vt = ttk.Frame(content)
@@ -1954,13 +2090,6 @@ class LoadoutDialog(tk.Toplevel):
             ttk.Button(bf, text="Add", command=self._add_trait).pack(side="left")
             ttk.Button(bf, text="Remove", command=self._remove_trait).pack(side="left", padx=4)
             self._refresh_traits()
-
-    def _unbind_wheel(self, canvas):
-        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-            try:
-                canvas.unbind_all(seq)
-            except tk.TclError:
-                pass
 
     # -- loadout views -----------------------------------------------------
     def _switch_view(self):
@@ -2324,6 +2453,73 @@ class ChassisDialog(simpledialog.Dialog):
         else:
             typed = self.search_var.get().strip()
             self.result = typed or None
+
+
+class SearchablePicker(ttk.Frame):
+    """Editable asset field with an owned, searchable selection window."""
+    def __init__(self, parent, *, textvariable, width, title):
+        super().__init__(parent)
+        self.variable = textvariable
+        self.values = ()
+        self.title = title
+        ttk.Entry(self, textvariable=textvariable, width=width).pack(side="left", fill="x", expand=True)
+        ttk.Button(self, text="Browse…", command=self._browse).pack(side="left", padx=(4, 0))
+
+    def __getitem__(self, key):
+        return self.values if key == "values" else super().__getitem__(key)
+
+    def __setitem__(self, key, value):
+        if key == "values":
+            self.values = tuple(value)
+        else:
+            super().__setitem__(key, value)
+
+    def _browse(self):
+        dialog = SearchChoiceDialog(self.winfo_toplevel(), self.title, self.values)
+        if dialog.result is not None:
+            self.variable.set(dialog.result)
+
+
+class SearchChoiceDialog(simpledialog.Dialog):
+    def __init__(self, parent, title, values):
+        self.values = tuple(values)
+        super().__init__(parent, title)
+
+    def body(self, master):
+        ttk.Label(master, text="Search, select a result, then press OK:").pack(anchor="w")
+        self.query = tk.StringVar()
+        entry = ttk.Entry(master, textvariable=self.query, width=48)
+        entry.pack(fill="x", pady=4)
+        frame = ttk.Frame(master)
+        frame.pack(fill="both", expand=True)
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+        self.results = tk.Listbox(frame, width=48, height=12, exportselection=False)
+        self.results.grid(row=0, column=0, sticky="nsew")
+        vertical = ttk.Scrollbar(frame, command=self.results.yview)
+        vertical.grid(row=0, column=1, sticky="ns")
+        horizontal = ttk.Scrollbar(frame, orient="horizontal", command=self.results.xview)
+        horizontal.grid(row=1, column=0, sticky="ew")
+        self.results.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+        self.results.bind("<Double-Button-1>", lambda e: self.ok())
+        self.query.trace_add("write", lambda *args: self._filter())
+        self._filter()
+        return entry
+
+    def _filter(self):
+        text = self.query.get().strip().casefold()
+        self.results.delete(0, "end")
+        for value in self.values:
+            if text in value.casefold():
+                self.results.insert("end", value)
+        if self.results.size():
+            self.results.selection_set(0)
+
+    def validate(self):
+        return bool(self.results.curselection())
+
+    def apply(self):
+        self.result = self.results.get(self.results.curselection()[0])
 
 
 if __name__ == "__main__":

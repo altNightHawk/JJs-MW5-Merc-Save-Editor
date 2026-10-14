@@ -63,8 +63,9 @@ nothing else needed.
 
 This tool edits your save files directly. **Always keep a backup** before editing.
 
-- The editor automatically writes a `.bak` copy the first time it saves over a
-  file — but you should keep your own copy too.
+- The editor creates a `.sav.bak` when opening a valid save and before replacing
+  an existing Save As destination. It preserves an existing backup; keep your
+  own copy too. The status bar reports if a backup cannot be created.
 - Use at your own risk. Save editing is not supported by the game's developers.
 
 ---
@@ -217,6 +218,18 @@ better because of you:
 - Everyone on Nexus and GitHub who has filed reports and suggestions.
 
 ## Changelog
+
+**v1.18.2**
+- **Searchable pickers:** pilot traits and inventory items use Browse windows
+  with filtering and scrollbars. Faction dialogs belong to the editor and target
+  the double-clicked row.
+- **Backups and safer saves:** a `.sav.bak` is created on Open, existing Save As
+  destinations are backed up, and saves are written atomically.
+- **Stability:** background results stay on Tk's main thread; scrolling stays
+  within its window. Callback errors are logged locally for diagnosis.
+- **Experimental Cantina progress:** edit existing path points/tiers or max
+  existing built-in paths. Jobs, offers, reward claims and campaign unlocks stay
+  unchanged. In-game behaviour is unverified; use Save As on a test copy.
 
 **v1.18.1**
 - **Pilot editing fixes:** Apply keeps the selected pilot and preserves unchanged

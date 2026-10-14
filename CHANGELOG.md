@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.18.2
+- **Searchable pilot-trait and inventory pickers.** Browse opens an owned window
+  with a search field, selectable results and both scrollbars. This replaces
+  the floating dropdowns for those controls; typing exact asset names still works.
+- **Faction editing targets the clicked row.** Double-click selects that row
+  explicitly and opens a dialog owned by the editor. Inventory count dialogs
+  also use an explicit parent.
+- **UI stability improvements.** Background update/catalog results are delivered
+  through a queue on Tk's main thread. Loadout and mech scrolling no longer
+  installs/removes application-wide wheel handlers. Python callback errors are
+  recorded locally in `%LOCALAPPDATA%/MW5SaveEditor/errors.log`.
+- **Backups on Open and overwrite.** Opening a valid save now creates its
+  `.sav.bak` immediately, keeping an existing original backup. Save As also
+  protects an existing destination. Saves are written through a temporary file
+  and atomically replaced after serialization and writing succeed.
+- **Experimental Cantina progression (issue #40).** An optional Cantina tab can
+  set points or tier for existing career paths, or max all existing built-in
+  paths. Thresholds were extracted from the installed game assets. It changes
+  only progress integers, preserves jobs/offers/reward claims and campaign
+  unlocks, and refuses to invent missing records. In-game reward/unlock behaviour
+  remains unverified: use Save As on a test copy.
+- 61 automated tests pass, including actual picker selection/cancellation,
+  faction routing, backup/failed-write checks and Cantina edits. A real Cantina
+  save round-trip changed just 10 bytes for maxing five paths; all other models,
+  offers and reward claims remained unchanged. These changes address reports
+  from Leyasu and sagggas; Leyasu's intermittent crash is not yet reproduced.
+
 ## v1.18.1
 - **Pilot selection stays on the edited pilot.** Apply no longer reloads the
   first pilot's fields, making XP and cap edits appear to have been lost.
