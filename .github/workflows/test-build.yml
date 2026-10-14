@@ -1,0 +1,69 @@
+name: Test build (unsigned)
+
+# Builds the same Nuitka EXE as release.yml, without signing, releasing or
+# uploading anywhere, and attaches the folder to the run as a downloadable
+# artifact. Runs on pushes to claude/** branches and on demand.
+# Keep the Nuitka flags in sync with release.yml.
+
+on:
+  push:
+    branches: ["claude/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # stable target for Nuitka
+
+      - name: Run unit tests
+        # Informational: some GUI tests need a display and skip themselves
+        # without one. A failure here does not block the test build.
+        continue-on-error: true
+        working-directory: editor
+        run: python -m unittest discover -p "test_*.py"
+
+      - name: Install build dependencies
+        run: pip install nuitka
+
+      - name: Build with Nuitka (native binary)
+        shell: pwsh
+        run: |
+          python -m nuitka --standalone --enable-plugin=tk-inter `
+            --windows-console-mode=disable `
+            --windows-icon-from-ico=editor/app_icon.ico `
+            --include-data-files=editor/app_icon.ico=app_icon.ico `
+            --include-data-files=editor/app_icon.png=app_icon.png `
+            --include-data-files=editor/item_catalog.json.gz=item_catalog.json.gz `
+            --include-data-files=editor/mech_catalog.json.gz=mech_catalog.json.gz `
+            --include-data-files=editor/trait_catalog.json.gz=trait_catalog.json.gz `
+            --include-data-files=editor/pilot_catalog.json.gz=pilot_catalog.json.gz `
+            --include-data-files=editor/stock_templates.json.gz=stock_templates.json.gz `
+            --company-name="JJ (jonayetjubaer-cmyk)" `
+            --product-name="JJ's MW5 Merc Save Editor" `
+            --file-version=0.0.0 `
+            --product-version=0.0.0 `
+            --file-description="JJ's MechWarrior 5 Mercenaries Save Editor (test build)" `
+            --copyright="(c) 2026 JJ (jonayetjubaer-cmyk). MIT License." `
+            --assume-yes-for-downloads `
+            --output-dir=build_out --output-filename=JJsaveEditor.exe `
+            editor/gui.py
+
+      - name: Name the build folder
+        shell: pwsh
+        run: Rename-Item build_out/gui.dist JJsaveEditor
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jjsaveeditor-testbuild
+          path: build_out/JJsaveEditor
+          if-no-files-found: error
