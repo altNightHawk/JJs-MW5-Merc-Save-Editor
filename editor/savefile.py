@@ -121,6 +121,11 @@ def build_text_property(s: str) -> bytes:
     return w.bytes()
 
 
+# An empty FText as the game stores an unused Bio1/Bio2: flags 0, base history,
+# no culture-invariant string.
+EMPTY_TEXT = b"\x00\x00\x00\x00\xff\x00\x00\x00\x00"
+
+
 def _set_leaf(prop: Property, new_payload: bytes):
     """Replace a leaf property's payload and rewrite its size field in
     raw_header (raw_header = [size:int64][...maybe sub-tag/trailing...])."""
@@ -1185,17 +1190,37 @@ class Pilot:
     def voice(self, value: str):
         self._set_asset_ref("DialogueVoiceAssetId", "MWDialogueVoiceAsset", value)
 
+    # A bio is up to three text fields: scripted pilots keep it all in Bio,
+    # generated pilots split it into Bio / Bio1 / Bio2 sentences. Those hold
+    # "{name}" placeholders that the game fills in when it shows the bio.
+    BIO_FIELDS = ("Bio", "Bio1", "Bio2")
+
+    def bio_parts(self) -> list[str]:
+        parts = []
+        for field in self.BIO_FIELDS:
+            p = _path(self.persona.decoded, field)
+            parts.append(read_text_property(p.raw_payload) if p else "")
+        return parts
+
     @property
     def bio(self) -> str:
-        p = _path(self.persona.decoded, "Bio")
-        return read_text_property(p.raw_payload) if p else ""
+        """The whole bio as one readable text, with the pilot's name filled in."""
+        text = " ".join(part.strip() for part in self.bio_parts() if part.strip())
+        return text.replace("{name}", self.full_name or self.callsign)
 
     @bio.setter
     def bio(self, value: str):
-        p = _path(self.persona.decoded, "Bio")
-        # Leave the game's localized text alone unless the bio really changes.
-        if p is not None and value != self.bio:
-            _set_leaf(p, build_text_property(value))
+        self.set_bio_parts(value)
+
+    def set_bio_parts(self, *parts: str):
+        """Write Bio, Bio1 and Bio2 (missing parts become empty text). Unchanged
+        fields keep their original localized payload."""
+        parts = list(parts) + [""] * (len(self.BIO_FIELDS) - len(parts))
+        for field, text in zip(self.BIO_FIELDS, parts):
+            p = _path(self.persona.decoded, field)
+            if p is None or text == read_text_property(p.raw_payload):
+                continue
+            _set_leaf(p, build_text_property(text) if text else EMPTY_TEXT)
 
     # -- traits ------------------------------------------------------------
     def traits_av(self):

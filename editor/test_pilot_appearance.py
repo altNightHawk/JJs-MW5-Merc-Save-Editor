@@ -2,7 +2,8 @@
 import unittest
 
 import pilot_catalog
-from savefile import Pilot, read_fstring_payload, write_fstring_payload
+from savefile import (EMPTY_TEXT, Pilot, build_text_property, read_fstring_payload,
+                      read_text_property, write_fstring_payload)
 from test_pilot_import import PilotHarness, _leaf, _pilot_element, _struct
 from ue_property import Reader, Writer, read_property_list, write_property_list
 
@@ -23,6 +24,15 @@ def _pilot(portrait="MalePilot", voice="MaleAlly4", voice_type="MWDialogueVoiceA
     persona.properties.append(_asset_ref("PortraitAssetId", "MWPortraitAsset", portrait))
     persona.properties.append(_asset_ref("DialogueVoiceAssetId", voice_type, voice))
     return Pilot(element)
+
+
+def _pilot_with_bio(parts=("Bio one.", "Bio two.", "Bio three.")):
+    pilot = _pilot()
+    persona = pilot.persona.decoded
+    for field, text in zip(Pilot.BIO_FIELDS, parts):
+        payload = build_text_property(text) if text else EMPTY_TEXT
+        persona.properties.append(_leaf(field, "TextProperty", payload))
+    return pilot
 
 
 def _reload(pilot: Pilot) -> Pilot:
@@ -73,6 +83,32 @@ class PilotAppearanceTests(unittest.TestCase):
         self.assertEqual(donor.portrait, "MalePilot")   # the donor is untouched
 
 
+class PilotBioTests(unittest.TestCase):
+    def test_bio_joins_the_three_parts_and_fills_in_the_name(self):
+        pilot = _pilot_with_bio(("{name} was born.", "Skilled.", "Loud."))
+        pilot.callsign = "Jo Smith"
+        self.assertEqual(pilot.bio, "Jo Smith was born. Skilled. Loud.")
+
+    def test_setting_bio_writes_bio_and_clears_the_other_parts(self):
+        pilot = _pilot_with_bio()
+        pilot.bio = "A brand new story."
+        self.assertEqual(pilot.bio_parts(), ["A brand new story.", "", ""])
+        self.assertEqual(_reload(pilot).bio, "A brand new story.")
+
+    def test_set_bio_parts_keeps_unchanged_payloads(self):
+        pilot = _pilot_with_bio()
+        before = pilot.persona.decoded.get("Bio1").raw_payload
+        pilot.set_bio_parts("Changed.", "Bio two.", "Bio three.")
+        self.assertEqual(pilot.persona.decoded.get("Bio1").raw_payload, before)
+        self.assertEqual(pilot.bio_parts()[0], "Changed.")
+
+    def test_pilot_without_bio_fields_reads_empty(self):
+        pilot = _pilot()
+        self.assertEqual(pilot.bio, "")
+        pilot.bio = "ignored"   # no field to write; must not raise
+        self.assertEqual(pilot.bio, "")
+
+
 class PilotCatalogTests(unittest.TestCase):
     def test_bundled_catalog_has_the_known_assets(self):
         self.assertIn("LeonFreeman", pilot_catalog.PORTRAITS)
@@ -101,12 +137,18 @@ class PilotCatalogTests(unittest.TestCase):
         self.assertEqual(pilot_catalog.persona_callsign({**persona, "callsign": "Raptor"}),
                          "Raptor")
 
-    def test_template_bios_get_the_pilots_name(self):
-        persona = {"asset_name": "X", "bio": "{name} hails from Luthien."}
-        self.assertEqual(pilot_catalog.persona_bio(persona, "Jo Smith"),
-                         "Jo Smith hails from Luthien.")
-        self.assertIsNone(pilot_catalog.persona_bio({"asset_name": "X", "bio": "ONEWORD"}, "Jo"))
-        self.assertIsNone(pilot_catalog.persona_bio({"asset_name": "X"}, "Jo"))
+    def test_persona_bio_parts_keep_placeholders_and_skip_non_prose(self):
+        persona = {"asset_name": "X", "bio": "{name} hails from Luthien.", "bio1": "Fast."}
+        self.assertEqual(pilot_catalog.persona_bio_parts(persona),
+                         ["{name} hails from Luthien.", "Fast.", ""])
+        self.assertIsNone(pilot_catalog.persona_bio_parts({"asset_name": "X", "bio": "ONEWORD"}))
+        self.assertIsNone(pilot_catalog.persona_bio_parts({"asset_name": "X"}))
+
+    def test_template_personas_have_no_name(self):
+        self.assertFalse(pilot_catalog.has_name({"asset_name": "Female_Rank3_5"}))
+        self.assertTrue(pilot_catalog.has_name({"asset_name": "Sam", "full_name": "Sam Hagel"}))
+        self.assertTrue(pilot_catalog.has_name(
+            {"asset_name": "X", "full_name": "Persona_Character_SamHagel_FullName"}))
 
     def test_persona_picker_round_trips(self):
         persona = pilot_catalog.PERSONAS[0]

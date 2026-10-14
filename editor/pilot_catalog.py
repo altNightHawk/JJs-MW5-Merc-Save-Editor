@@ -105,8 +105,9 @@ def is_readable(text: str | None) -> bool:
 
 
 def is_readable_bio(text: str | None) -> bool:
-    """A bio is prose; a lone token is an asset name or key, not text."""
-    return is_readable(text) and " " in text.strip()
+    """A bio is prose; a lone identifier-like token is an asset name or key, not text."""
+    return is_readable(text) and (
+        " " in text.strip() or not re.fullmatch(r"[A-Za-z0-9_]+", text.strip()))
 
 
 def _name_from_key(key: str | None) -> str | None:
@@ -139,13 +140,18 @@ def persona_callsign(persona: dict) -> str:
     return _name_from_key(value) or persona_name(persona)
 
 
-def persona_bio(persona: dict, name: str) -> str | None:
-    """The persona's bio text, or None when it has none. Some generic bios are
-    templates ("{name} hails from ..."); fill in the pilot's name."""
-    bio = persona.get("bio")
-    if not is_readable_bio(bio):
-        return None
-    return bio.replace("{name}", name)
+def persona_bio_parts(persona: dict) -> list[str] | None:
+    """The persona's bio as [bio, bio1, bio2] ("{name}" placeholders kept: the
+    game fills them in), or None when the persona has no bio text."""
+    parts = [persona.get(key) or "" for key in ("bio", "bio1", "bio2")]
+    parts = [p if is_readable_bio(p) else "" for p in parts]
+    return parts if any(parts) else None
+
+
+def has_name(persona: dict) -> bool:
+    """True if the persona carries a real name (templates only have asset names)."""
+    return any(is_readable(persona.get(f)) or _name_from_key(persona.get(f))
+               for f in ("full_name", "callsign"))
 
 
 def is_hireable(persona: dict) -> bool:

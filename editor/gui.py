@@ -945,6 +945,13 @@ class EditorApp(tk.Tk):
             "Voice", ar + 3, "Choose dialogue voice", self.on_set_pilot_voice, "Set")
         self.pilot_persona_var, self.pilot_persona_cb = look_row(
             "Persona", ar + 4, "Choose persona", self.on_apply_persona, "Apply")
+        bf = ttk.Frame(form)
+        bf.grid(row=ar + 6, column=0, columnspan=3, sticky="w", pady=2)
+        ttk.Label(bf, text="Bio", width=8).pack(side="left", anchor="n")
+        self.pilot_bio_text = tk.Text(bf, width=34, height=5, wrap="word")
+        self.pilot_bio_text.pack(side="left")
+        ttk.Button(bf, text="Set", command=self.on_set_pilot_bio).pack(
+            side="left", padx=4, anchor="n")
         popts = ttk.Frame(form)
         popts.grid(row=ar + 5, column=0, columnspan=3, sticky="w")
         ttk.Label(popts, text="", width=8).pack(side="left")
@@ -1660,6 +1667,8 @@ class EditorApp(tk.Tk):
             self.pilot_vars[f"cap_{sk}"].set(str(p.skill_cap(sk)))
         self.pilot_portrait_var.set(p.portrait)
         self.pilot_voice_var.set(p.voice)
+        self.pilot_bio_text.delete("1.0", "end")
+        self.pilot_bio_text.insert("1.0", p.bio)
         self._refresh_pilot_looks()
         self._refresh_pilot_traits(p)
 
@@ -1701,6 +1710,19 @@ class EditorApp(tk.Tk):
     def on_set_pilot_voice(self):
         self._set_pilot_look("voice", self.pilot_voice_var, "voice")
 
+    def on_set_pilot_bio(self):
+        """Write the bio box to the selected pilot (as one text; Bio1/Bio2 cleared)."""
+        if not self._guard():
+            return
+        idx = self._selected_pilot_index()
+        if idx is None:
+            return self._need_selection()
+        p = self.save.pilots()[idx]
+        text = self.pilot_bio_text.get("1.0", "end").strip()
+        if text != p.bio:
+            p.bio = text
+        self.status.set(f"Set {p.callsign}'s bio. Remember to Save.")
+
     def on_apply_persona(self):
         if not self._guard():
             return
@@ -1716,16 +1738,24 @@ class EditorApp(tk.Tk):
                 p.portrait = persona["portrait"]
             if persona.get("voice"):
                 p.voice = persona["voice"]
+            note = ""
             if self.pilot_persona_text_var.get():
-                p.full_name = pilot_catalog.persona_name(persona)
-                p.callsign = pilot_catalog.persona_callsign(persona)
-                bio = pilot_catalog.persona_bio(persona, p.full_name)
-                if bio is not None:
-                    p.bio = bio
+                # Generic template personas have no name or bio of their own;
+                # keep the pilot's own rather than writing an asset name.
+                if pilot_catalog.has_name(persona):
+                    p.full_name = pilot_catalog.persona_name(persona)
+                    p.callsign = pilot_catalog.persona_callsign(persona)
+                else:
+                    note = " (no name in persona; name kept)"
+                parts = pilot_catalog.persona_bio_parts(persona)
+                if parts is not None:
+                    p.set_bio_parts(*parts)
+                else:
+                    note += " (no bio in persona; bio kept)"
         except ValueError as exc:
             return messagebox.showerror("Can't apply persona", str(exc))
         self._refresh_pilots()
-        self.status.set(f"Applied persona '{persona['asset_name']}' to pilot #{idx}. "
+        self.status.set(f"Applied persona '{persona['asset_name']}' to pilot #{idx}{note}. "
                         "Remember to Save.")
 
     def _refresh_pilot_traits(self, pilot=None):
