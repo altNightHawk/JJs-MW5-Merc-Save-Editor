@@ -914,44 +914,46 @@ class EditorApp(tk.Tk):
         ttk.Button(taf, text="Add", command=self.on_add_pilot_trait).pack(side="left", padx=4)
         ttk.Button(taf, text="Remove", command=self.on_remove_pilot_trait).pack(side="left")
 
-        # -- appearance (apply immediately, like traits) --
+        # -- appearance (each button applies immediately, like the trait Add button) --
         ar = tr + 4
         ttk.Separator(form, orient="horizontal").grid(row=ar, column=0, columnspan=3, sticky="ew", pady=6)
         ttk.Label(form, text="Appearance", font=("", 9, "bold")).grid(row=ar + 1, column=0, sticky="w")
+        sexf = ttk.Frame(form)
+        sexf.grid(row=ar + 1, column=1, columnspan=2, sticky="w")
         self.pilot_sex_var = tk.StringVar(value="All")
-        sex_cb = ttk.Combobox(form, textvariable=self.pilot_sex_var, width=8, state="readonly",
+        sex_cb = ttk.Combobox(sexf, textvariable=self.pilot_sex_var, width=8, state="readonly",
                               values=pilot_catalog.SEX_FILTERS)
-        sex_cb.grid(row=ar + 1, column=1, sticky="w")
+        sex_cb.pack(side="left")
         sex_cb.bind("<<ComboboxSelected>>", lambda e: self._refresh_pilot_looks())
-        ttk.Label(form, text="Filter by sex", style="Muted.TLabel").grid(
-            row=ar + 1, column=2, sticky="w")
-        self.pilot_portrait_var = tk.StringVar()
-        self.pilot_voice_var = tk.StringVar()
-        ttk.Label(form, text="Portrait").grid(row=ar + 2, column=0, sticky="w", pady=2)
-        self.pilot_portrait_cb = SearchablePicker(
-            form, textvariable=self.pilot_portrait_var, width=24, title="Choose portrait")
-        self.pilot_portrait_cb.grid(row=ar + 2, column=1, columnspan=2, sticky="w", pady=2)
-        ttk.Label(form, text="Voice").grid(row=ar + 3, column=0, sticky="w", pady=2)
-        self.pilot_voice_cb = SearchablePicker(
-            form, textvariable=self.pilot_voice_var, width=24, title="Choose dialogue voice")
-        self.pilot_voice_cb.grid(row=ar + 3, column=1, columnspan=2, sticky="w", pady=2)
-        ttk.Button(form, text="Apply portrait & voice", command=self.on_apply_pilot_look).grid(
-            row=ar + 4, column=0, columnspan=2, sticky="w", pady=4)
-        ttk.Label(form, text="Persona").grid(row=ar + 5, column=0, sticky="w", pady=2)
-        self.pilot_persona_var = tk.StringVar()
-        self.pilot_persona_cb = SearchablePicker(
-            form, textvariable=self.pilot_persona_var, width=24, title="Choose persona")
-        self.pilot_persona_cb.grid(row=ar + 5, column=1, columnspan=2, sticky="w", pady=2)
+        ttk.Label(sexf, text="Filter by sex",
+                  style="Muted.TLabel").pack(side="left", padx=6)
+
+        def look_row(label, row, title, command, button):
+            # One compact row (label, picker, button) so it fits like the trait row.
+            holder = ttk.Frame(form)
+            holder.grid(row=row, column=0, columnspan=3, sticky="w", pady=2)
+            ttk.Label(holder, text=label, width=8).pack(side="left")
+            var = tk.StringVar()
+            picker = SearchablePicker(holder, textvariable=var, width=26, title=title)
+            picker.pack(side="left")
+            ttk.Button(holder, text=button, command=command).pack(side="left", padx=4)
+            return var, picker
+
+        self.pilot_portrait_var, self.pilot_portrait_cb = look_row(
+            "Portrait", ar + 2, "Choose portrait", self.on_set_pilot_portrait, "Set")
+        self.pilot_voice_var, self.pilot_voice_cb = look_row(
+            "Voice", ar + 3, "Choose dialogue voice", self.on_set_pilot_voice, "Set")
+        self.pilot_persona_var, self.pilot_persona_cb = look_row(
+            "Persona", ar + 4, "Choose persona", self.on_apply_persona, "Apply")
         popts = ttk.Frame(form)
-        popts.grid(row=ar + 6, column=0, columnspan=3, sticky="w")
+        popts.grid(row=ar + 5, column=0, columnspan=3, sticky="w")
+        ttk.Label(popts, text="", width=8).pack(side="left")
         self.pilot_persona_all_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(popts, text="Show all personas", variable=self.pilot_persona_all_var,
                         command=self._refresh_pilot_looks).pack(side="left")
         self.pilot_persona_text_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(popts, text="Also set name & bio",
                         variable=self.pilot_persona_text_var).pack(side="left", padx=8)
-        ttk.Button(form, text="Apply persona", command=self.on_apply_persona).grid(
-            row=ar + 7, column=0, columnspan=2, sticky="w", pady=4)
 
     # -- inventory tab -----------------------------------------------------
     def _build_inventory_tab(self):
@@ -1675,24 +1677,29 @@ class EditorApp(tk.Tk):
         self.pilot_persona_cb["values"] = pilot_catalog.persona_choices(
             hireable_only=not self.pilot_persona_all_var.get())
 
-    def on_apply_pilot_look(self):
+    def _set_pilot_look(self, field, var, label):
+        """Write one appearance field to the selected pilot right away."""
         if not self._guard():
             return
         idx = self._selected_pilot_index()
         if idx is None:
             return self._need_selection()
+        value = var.get().strip()
+        if not value:
+            return messagebox.showinfo(f"Pick {label}", f"Choose or type a {label} asset name.")
         p = self.save.pilots()[idx]
         try:
-            portrait = self.pilot_portrait_var.get().strip()
-            voice = self.pilot_voice_var.get().strip()
-            if not portrait or not voice:
-                raise ValueError("Choose both a portrait and a voice.")
-            p.portrait = portrait
-            p.voice = voice
+            setattr(p, field, value)
         except ValueError as exc:
             return messagebox.showerror("Invalid input", str(exc))
-        self.status.set(f"Set {p.callsign}'s portrait to {portrait} and voice to {voice}. "
-                        "Remember to Save.")
+        var.set(getattr(p, field))
+        self.status.set(f"Set {p.callsign}'s {label} to {value}. Remember to Save.")
+
+    def on_set_pilot_portrait(self):
+        self._set_pilot_look("portrait", self.pilot_portrait_var, "portrait")
+
+    def on_set_pilot_voice(self):
+        self._set_pilot_look("voice", self.pilot_voice_var, "voice")
 
     def on_apply_persona(self):
         if not self._guard():
