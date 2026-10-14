@@ -51,6 +51,7 @@ from item_catalog import CATALOG, CATEGORY_INVENTORY, WEAPONS, EQUIPMENT, AMMO
 from trait_catalog import (PILOT_TRAITS, MECH_TRAITS,
                            dropdown_values as trait_dropdown_values,
                            resolve as resolve_trait)
+import pilot_catalog
 from savefile import weapon_class, hardpoint_class, ARMOR_PARTS, REAR_PARTS
 from stock_templates import max_armor_caps, stock_types
 
@@ -913,6 +914,45 @@ class EditorApp(tk.Tk):
         ttk.Button(taf, text="Add", command=self.on_add_pilot_trait).pack(side="left", padx=4)
         ttk.Button(taf, text="Remove", command=self.on_remove_pilot_trait).pack(side="left")
 
+        # -- appearance (apply immediately, like traits) --
+        ar = tr + 4
+        ttk.Separator(form, orient="horizontal").grid(row=ar, column=0, columnspan=3, sticky="ew", pady=6)
+        ttk.Label(form, text="Appearance", font=("", 9, "bold")).grid(row=ar + 1, column=0, sticky="w")
+        self.pilot_sex_var = tk.StringVar(value="All")
+        sex_cb = ttk.Combobox(form, textvariable=self.pilot_sex_var, width=8, state="readonly",
+                              values=pilot_catalog.SEX_FILTERS)
+        sex_cb.grid(row=ar + 1, column=1, sticky="w")
+        sex_cb.bind("<<ComboboxSelected>>", lambda e: self._refresh_pilot_looks())
+        ttk.Label(form, text="Filter by sex", style="Muted.TLabel").grid(
+            row=ar + 1, column=2, sticky="w")
+        self.pilot_portrait_var = tk.StringVar()
+        self.pilot_voice_var = tk.StringVar()
+        ttk.Label(form, text="Portrait").grid(row=ar + 2, column=0, sticky="w", pady=2)
+        self.pilot_portrait_cb = SearchablePicker(
+            form, textvariable=self.pilot_portrait_var, width=24, title="Choose portrait")
+        self.pilot_portrait_cb.grid(row=ar + 2, column=1, columnspan=2, sticky="w", pady=2)
+        ttk.Label(form, text="Voice").grid(row=ar + 3, column=0, sticky="w", pady=2)
+        self.pilot_voice_cb = SearchablePicker(
+            form, textvariable=self.pilot_voice_var, width=24, title="Choose dialogue voice")
+        self.pilot_voice_cb.grid(row=ar + 3, column=1, columnspan=2, sticky="w", pady=2)
+        ttk.Button(form, text="Apply portrait & voice", command=self.on_apply_pilot_look).grid(
+            row=ar + 4, column=0, columnspan=2, sticky="w", pady=4)
+        ttk.Label(form, text="Persona").grid(row=ar + 5, column=0, sticky="w", pady=2)
+        self.pilot_persona_var = tk.StringVar()
+        self.pilot_persona_cb = SearchablePicker(
+            form, textvariable=self.pilot_persona_var, width=24, title="Choose persona")
+        self.pilot_persona_cb.grid(row=ar + 5, column=1, columnspan=2, sticky="w", pady=2)
+        popts = ttk.Frame(form)
+        popts.grid(row=ar + 6, column=0, columnspan=3, sticky="w")
+        self.pilot_persona_all_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(popts, text="Show all personas", variable=self.pilot_persona_all_var,
+                        command=self._refresh_pilot_looks).pack(side="left")
+        self.pilot_persona_text_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(popts, text="Also set name & bio",
+                        variable=self.pilot_persona_text_var).pack(side="left", padx=8)
+        ttk.Button(form, text="Apply persona", command=self.on_apply_persona).grid(
+            row=ar + 7, column=0, columnspan=2, sticky="w", pady=4)
+
     # -- inventory tab -----------------------------------------------------
     def _build_inventory_tab(self):
         top = ttk.Frame(self.inv_tab)
@@ -1616,7 +1656,69 @@ class EditorApp(tk.Tk):
         for sk in SKILLS:
             self.pilot_vars[f"skill_{sk}"].set(str(p.skill(sk)))
             self.pilot_vars[f"cap_{sk}"].set(str(p.skill_cap(sk)))
+        self.pilot_portrait_var.set(p.portrait)
+        self.pilot_voice_var.set(p.voice)
+        self._refresh_pilot_looks()
         self._refresh_pilot_traits(p)
+
+    def _refresh_pilot_looks(self):
+        """Portrait / voice / persona choices: the catalog plus whatever the
+        loaded save already uses (so modded or unknown assets stay selectable)."""
+        pilots = self.save.pilots() if self.save else []
+        sex = self.pilot_sex_var.get()
+        self.pilot_portrait_cb["values"] = pilot_catalog.asset_choices(
+            [p.portrait for p in pilots], pilot_catalog.PORTRAITS,
+            pilot_catalog.portrait_sex, sex)
+        self.pilot_voice_cb["values"] = pilot_catalog.asset_choices(
+            [p.voice for p in pilots], pilot_catalog.VOICES,
+            pilot_catalog.voice_sex, sex)
+        self.pilot_persona_cb["values"] = pilot_catalog.persona_choices(
+            hireable_only=not self.pilot_persona_all_var.get())
+
+    def on_apply_pilot_look(self):
+        if not self._guard():
+            return
+        idx = self._selected_pilot_index()
+        if idx is None:
+            return self._need_selection()
+        p = self.save.pilots()[idx]
+        try:
+            portrait = self.pilot_portrait_var.get().strip()
+            voice = self.pilot_voice_var.get().strip()
+            if not portrait or not voice:
+                raise ValueError("Choose both a portrait and a voice.")
+            p.portrait = portrait
+            p.voice = voice
+        except ValueError as exc:
+            return messagebox.showerror("Invalid input", str(exc))
+        self.status.set(f"Set {p.callsign}'s portrait to {portrait} and voice to {voice}. "
+                        "Remember to Save.")
+
+    def on_apply_persona(self):
+        if not self._guard():
+            return
+        idx = self._selected_pilot_index()
+        if idx is None:
+            return self._need_selection()
+        persona = pilot_catalog.find_persona(self.pilot_persona_var.get())
+        if persona is None:
+            return messagebox.showinfo("Pick persona", "Choose a persona from the list.")
+        p = self.save.pilots()[idx]
+        try:
+            if persona.get("portrait"):
+                p.portrait = persona["portrait"]
+            if persona.get("voice"):
+                p.voice = persona["voice"]
+            if self.pilot_persona_text_var.get():
+                p.full_name = pilot_catalog.persona_name(persona)
+                p.callsign = pilot_catalog.persona_callsign(persona)
+                if pilot_catalog.is_readable_bio(persona.get("bio")):
+                    p.bio = persona["bio"]
+        except ValueError as exc:
+            return messagebox.showerror("Can't apply persona", str(exc))
+        self._refresh_pilots()
+        self.status.set(f"Applied persona '{persona['asset_name']}' to pilot #{idx}. "
+                        "Remember to Save.")
 
     def _refresh_pilot_traits(self, pilot=None):
         if pilot is None:

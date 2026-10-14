@@ -1147,6 +1147,56 @@ class Pilot:
         if p is not None:
             p.raw_payload = value
 
+    # -- appearance (portrait / voice / bio) -------------------------------
+    # Portrait and voice are primary-asset references:
+    #   <field> { ID { PrimaryAssetType { Name }, PrimaryAssetName } }
+    # (MWPortraitAsset / MWDialogueVoiceAsset). "None" means unset.
+    def _asset_ref(self, field: str) -> str:
+        p = _path(self.persona.decoded, field, "ID", "PrimaryAssetName")
+        return read_fstring_payload(p.raw_payload) if p else ""
+
+    def _set_asset_ref(self, field: str, asset_type: str, value: str):
+        name = _path(self.persona.decoded, field, "ID", "PrimaryAssetName")
+        kind = _path(self.persona.decoded, field, "ID", "PrimaryAssetType", "Name")
+        if name is None or kind is None:
+            raise ValueError(f"This pilot has no {field}.")
+        value = (value or "").strip()
+        if not value:
+            raise ValueError(f"{field} cannot be empty.")
+        # The commander's voice is stored as None/None, so set the type too.
+        if read_fstring_payload(kind.raw_payload) != asset_type:
+            _set_leaf(kind, write_fstring_payload(asset_type))
+        if read_fstring_payload(name.raw_payload) != value:
+            _set_leaf(name, write_fstring_payload(value))
+
+    @property
+    def portrait(self) -> str:
+        return self._asset_ref("PortraitAssetId")
+
+    @portrait.setter
+    def portrait(self, value: str):
+        self._set_asset_ref("PortraitAssetId", "MWPortraitAsset", value)
+
+    @property
+    def voice(self) -> str:
+        return self._asset_ref("DialogueVoiceAssetId")
+
+    @voice.setter
+    def voice(self, value: str):
+        self._set_asset_ref("DialogueVoiceAssetId", "MWDialogueVoiceAsset", value)
+
+    @property
+    def bio(self) -> str:
+        p = _path(self.persona.decoded, "Bio")
+        return read_text_property(p.raw_payload) if p else ""
+
+    @bio.setter
+    def bio(self, value: str):
+        p = _path(self.persona.decoded, "Bio")
+        # Leave the game's localized text alone unless the bio really changes.
+        if p is not None and value != self.bio:
+            _set_leaf(p, build_text_property(value))
+
     # -- traits ------------------------------------------------------------
     def traits_av(self):
         """The PilotTraits ArrayValue (present even when empty), or None."""
@@ -1962,12 +2012,14 @@ class SaveFile:
 
     def add_pilot(self, callsign: str, full_name: str | None = None,
                   skills: dict | None = None, salary: int = 10000,
-                  hiring_cost: int = 0) -> "Pilot":
+                  hiring_cost: int = 0, portrait: str | None = None,
+                  voice: str | None = None) -> "Pilot":
         """Add a new pilot to the roster by cloning a regular (non-commander)
         pilot, stamping a fresh PersonaId GUID, and applying name + skills.
 
         skills: {skill_name: total_exp}; any omitted skill keeps the donor's
-        value. Returns the new Pilot."""
+        value. portrait / voice: optional asset names (see pilot_catalog); the
+        donor's are kept when omitted. Returns the new Pilot."""
         roster = self.model("RosterModel").plist.get("PilotRoster").decoded
         # pick a non-commander donor (LockedPlayerSlot == ...::None)
         donor_idx = 0
@@ -1986,6 +2038,10 @@ class SaveFile:
                 pilot.set_skill(name, int(exp))
         pilot.salary = salary
         pilot.hiring_cost = hiring_cost
+        if portrait:
+            pilot.portrait = portrait
+        if voice:
+            pilot.voice = voice
         roster.elements.append(clone)
         roster.count += 1
         return pilot
