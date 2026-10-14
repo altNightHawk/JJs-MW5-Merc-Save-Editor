@@ -101,6 +101,13 @@ class PilotCatalogTests(unittest.TestCase):
         self.assertEqual(pilot_catalog.persona_callsign({**persona, "callsign": "Raptor"}),
                          "Raptor")
 
+    def test_template_bios_get_the_pilots_name(self):
+        persona = {"asset_name": "X", "bio": "{name} hails from Luthien."}
+        self.assertEqual(pilot_catalog.persona_bio(persona, "Jo Smith"),
+                         "Jo Smith hails from Luthien.")
+        self.assertIsNone(pilot_catalog.persona_bio({"asset_name": "X", "bio": "ONEWORD"}, "Jo"))
+        self.assertIsNone(pilot_catalog.persona_bio({"asset_name": "X"}, "Jo"))
+
     def test_persona_picker_round_trips(self):
         persona = pilot_catalog.PERSONAS[0]
         found = pilot_catalog.find_persona(pilot_catalog.persona_display(persona))

@@ -139,6 +139,15 @@ def persona_callsign(persona: dict) -> str:
     return _name_from_key(value) or persona_name(persona)
 
 
+def persona_bio(persona: dict, name: str) -> str | None:
+    """The persona's bio text, or None when it has none. Some generic bios are
+    templates ("{name} hails from ..."); fill in the pilot's name."""
+    bio = persona.get("bio")
+    if not is_readable_bio(bio):
+        return None
+    return bio.replace("{name}", name)
+
+
 def is_hireable(persona: dict) -> bool:
     return bool(_HIREABLE_TAGS.intersection(persona.get("attributes") or []))
 

@@ -1712,8 +1712,9 @@ class EditorApp(tk.Tk):
             if self.pilot_persona_text_var.get():
                 p.full_name = pilot_catalog.persona_name(persona)
                 p.callsign = pilot_catalog.persona_callsign(persona)
-                if pilot_catalog.is_readable_bio(persona.get("bio")):
-                    p.bio = persona["bio"]
+                bio = pilot_catalog.persona_bio(persona, p.full_name)
+                if bio is not None:
+                    p.bio = bio
         except ValueError as exc:
             return messagebox.showerror("Can't apply persona", str(exc))
         self._refresh_pilots()
