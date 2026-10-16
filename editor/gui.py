@@ -1662,21 +1662,44 @@ class EditorApp(tk.Tk):
         if idx is None:
             return
         p = self.save.pilots()[idx]
+        self._load_pilot_stats(p)
+        self._load_pilot_look(p)
+        self._load_pilot_bio(p)
+        self._refresh_pilot_looks()
+        self._refresh_pilot_traits(p)
+
+    # The sections below reload only their own widgets, so a button that
+    # changes one group of fields never discards pending edits in the others.
+    def _load_pilot_stats(self, p):
+        """Name, salary, skill XP and caps -- the 'Apply to Pilot' group."""
         self.pilot_vars["callsign"].set(p.callsign)
         self.pilot_vars["full_name"].set(p.full_name)
         self.pilot_vars["salary"].set(str(p.salary))
         for sk in SKILLS:
             self.pilot_vars[f"skill_{sk}"].set(str(p.skill(sk)))
             self.pilot_vars[f"cap_{sk}"].set(str(p.skill_cap(sk)))
+
+    def _load_pilot_names(self, p):
+        """Just the callsign and full-name fields."""
+        self.pilot_vars["callsign"].set(p.callsign)
+        self.pilot_vars["full_name"].set(p.full_name)
+
+    def _load_pilot_look(self, p):
         self.pilot_portrait_var.set(pilot_catalog.portrait_display(p.portrait))
         self.pilot_voice_var.set(pilot_catalog.voice_display(p.voice))
+
+    def _load_pilot_bio(self, p):
         self.pilot_bio_text.delete("1.0", "end")
         self.pilot_bio_text.insert("1.0", p.bio)
         self.pilot_bio_caption.set(
             "Current bio. Edit it, then click Set." if p.bio
             else "This pilot has no bio. Type one, then click Set.")
-        self._refresh_pilot_looks()
-        self._refresh_pilot_traits(p)
+
+    def _update_pilot_list_label(self, idx, p):
+        """Refresh one roster entry's text without touching the form."""
+        self.pilot_list.delete(idx)
+        self.pilot_list.insert(idx, p.callsign or p.full_name or "(pilot)")
+        self.pilot_list.selection_set(idx)
 
     def _refresh_pilot_looks(self):
         """Portrait / voice / persona choices: the catalog plus whatever the
@@ -1748,22 +1771,32 @@ class EditorApp(tk.Tk):
             if persona.get("voice"):
                 p.voice = persona["voice"]
             note = ""
+            text_changed = bio_changed = False
             if self.pilot_persona_text_var.get():
                 # Generic template personas have no name or bio of their own;
                 # keep the pilot's own rather than writing an asset name.
                 if pilot_catalog.has_name(persona):
                     p.full_name = pilot_catalog.persona_name(persona)
                     p.callsign = pilot_catalog.persona_callsign(persona)
+                    text_changed = True
                 else:
                     note = " (no name in persona; name kept)"
                 parts = pilot_catalog.persona_bio_parts(persona)
                 if parts is not None:
                     p.set_bio_parts(*parts)
+                    bio_changed = True
                 else:
                     note += " (no bio in persona; bio kept)"
         except ValueError as exc:
             return messagebox.showerror("Can't apply persona", str(exc))
-        self._refresh_pilots()
+        # Reload only what the persona wrote; other pending edits stay put.
+        self._load_pilot_look(p)
+        self._refresh_pilot_looks()
+        if text_changed:
+            self._load_pilot_names(p)
+            self._update_pilot_list_label(idx, p)
+        if bio_changed:
+            self._load_pilot_bio(p)
         self.status.set(f"Applied persona '{persona['asset_name']}' to pilot #{idx}{note}. "
                         "Remember to Save.")
 
@@ -1835,7 +1868,9 @@ class EditorApp(tk.Tk):
                 p.set_skill(sk, xp[sk])
                 if sk in CAPPED_SKILLS:
                     p.set_skill_cap(sk, caps[sk])
-            self._refresh_pilots()
+            # Reload only this group; a pending portrait/voice/bio edit survives.
+            self._load_pilot_stats(p)
+            self._update_pilot_list_label(idx, p)
             self.status.set(f"Applied changes to pilot #{idx}. Remember to Save.")
         except ValueError as exc:
             messagebox.showerror("Invalid input", f"Salary, skill XP and caps must be whole numbers.\n{exc}")
