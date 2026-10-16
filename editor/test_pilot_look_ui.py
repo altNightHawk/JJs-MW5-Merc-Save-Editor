@@ -119,6 +119,65 @@ class PilotLookUiTests(unittest.TestCase):
         self.assertEqual(pilot.bio_parts(), ["{name} one.", "Two.", ""])
         self.assertEqual(pilot.bio, "Jo one. Two.")   # test pilot has no FullName field
 
+    def _type_pending_edits(self):
+        """Type into the form without clicking any Apply / Set button."""
+        self.app.pilot_vars["callsign"].set("Typed Callsign")
+        self.app.pilot_vars["salary"].set("4321")
+        self.app.pilot_vars["skill_Ballistics"].set("123456")
+        self.app.pilot_vars["cap_Ballistics"].set("7")
+        self.app.pilot_bio_text.delete("1.0", "end")
+        self.app.pilot_bio_text.insert("1.0", "Typed bio.")
+
+    def _apply_persona(self, persona, with_text):
+        with patch.object(gui.pilot_catalog, "find_persona", return_value=persona):
+            self.app.pilot_persona_var.set(persona["asset_name"])
+            self.app.pilot_persona_text_var.set(with_text)
+            self.app.on_apply_persona()
+
+    PERSONA = {"asset_name": "P", "full_name": "Jo Smith", "callsign": "Jo",
+               "bio": "Persona bio.", "portrait": "Raptor", "voice": "MaleAlly9"}
+
+    def test_persona_without_text_keeps_every_pending_edit(self):
+        self._select(0)
+        saved = self.app.save.pilots()[0]
+        before = (saved.callsign, saved.salary, saved.skill("Ballistics"), saved.bio_parts())
+        self._type_pending_edits()
+        self._apply_persona(self.PERSONA, False)
+        v = self.app.pilot_vars
+        self.assertEqual((v["callsign"].get(), v["salary"].get(), v["skill_Ballistics"].get(),
+                          v["cap_Ballistics"].get()), ("Typed Callsign", "4321", "123456", "7"))
+        self.assertEqual(self.app.pilot_bio_text.get("1.0", "end").strip(), "Typed bio.")
+        self.assertEqual(gui.pilot_catalog.resolve_asset(self.app.pilot_portrait_var.get()), "Raptor")
+        self.assertEqual((saved.portrait, saved.voice), ("Raptor", "MaleAlly9"))
+        self.assertEqual(before, (saved.callsign, saved.salary, saved.skill("Ballistics"),
+                                  saved.bio_parts()))
+
+    def test_persona_with_text_replaces_only_name_and_bio(self):
+        self._select(0)
+        self._type_pending_edits()
+        self._apply_persona(self.PERSONA, True)
+        v = self.app.pilot_vars
+        self.assertEqual(v["callsign"].get(), "Jo")
+        self.assertEqual(self.app.pilot_bio_text.get("1.0", "end").strip(), "Persona bio.")
+        self.assertEqual((v["salary"].get(), v["skill_Ballistics"].get(), v["cap_Ballistics"].get()),
+                         ("4321", "123456", "7"))
+        self.assertEqual(self.app.pilot_list.get(0), "Jo")
+
+    def test_apply_pilot_keeps_pending_portrait_voice_and_bio(self):
+        self._select(0)
+        self._type_pending_edits()
+        self.app.pilot_portrait_var.set("Female_Rank3_1")
+        self.app.pilot_voice_var.set("FemaleAlly1")
+        self.app.on_apply_pilot()
+        pilot = self.app.save.pilots()[0]
+        self.assertEqual(pilot.callsign, "Typed Callsign")   # fixture has no salary/skill fields
+        self.assertEqual(self.app.pilot_list.get(0), "Typed Callsign")
+        self.assertEqual(self.app.pilot_portrait_var.get(), "Female_Rank3_1")
+        self.assertEqual(self.app.pilot_voice_var.get(), "FemaleAlly1")
+        self.assertEqual(self.app.pilot_bio_text.get("1.0", "end").strip(), "Typed bio.")
+        self.assertEqual((pilot.portrait, pilot.voice), ("MalePilot", pilot.voice))
+        self.assertEqual(pilot.bio_parts(), ["Bio one.", "Bio two.", "Bio three."])
+
 
 if __name__ == "__main__":
     unittest.main()
